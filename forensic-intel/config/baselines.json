@@ -1,0 +1,18 @@
+{
+  "_note": "What 'normal' is for this system. Learned per-system by health/baseline.py; these are starting placeholders.",
+  "cpu_percent": {
+    "typical": null,
+    "peak": null
+  },
+  "memory_percent": {
+    "typical": null,
+    "peak": null
+  },
+  "disk_percent": {
+    "typical": null
+  },
+  "network_outbound_mbps": {
+    "typical": null,
+    "peak": null
+  }
+}

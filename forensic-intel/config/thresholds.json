@@ -1,0 +1,16 @@
+{
+  "_note": "When to alert, when to isolate.",
+  "health_score": {
+    "alert_below": 70,
+    "critical_below": 40,
+    "drop_alert": 20
+  },
+  "threat_score": {
+    "alert_above": 50,
+    "isolate_above": 80
+  },
+  "correlation": {
+    "quiet_intrusion_health_min": 80,
+    "quiet_intrusion_threat_min": 60
+  }
+}
