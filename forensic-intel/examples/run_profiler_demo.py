@@ -1,6 +1,6 @@
-"""Quick demo of the full analysis pipeline.
+"""Full pipeline demo with evidence persistence.
 
-collector → rhythm → profiler → threat score
+collector → ImmutableLog → rhythm → profiler → entry/data-flow → threat score
 
 Run from the forensic-intel directory:
 
@@ -15,76 +15,70 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from collector.agent import SecurityEventCollector  # type: ignore
+from storage.immutable_log import ImmutableLog  # type: ignore
 from analyzer.rhythm_analyzer import RhythmAnalyzer  # type: ignore
 from analyzer.profiler import Profiler  # type: ignore
-from analyzer.threat_score import (  # type: ignore
-    ThreatScorer,
-    EntrySignal,
-    DataFlowSignal,
-)
+from analyzer.entry_analyzer import EntryAnalyzer  # type: ignore
+from analyzer.data_flow_analyzer import DataFlowAnalyzer  # type: ignore
+from analyzer.threat_score import ThreatScorer  # type: ignore
 
 
-def run_one(style: str) -> None:
+def run_one(style: str, log: ImmutableLog) -> None:
     print(f"\n{'='*60}")
     print(f"  Session style: {style.upper()}")
     print(f"{'='*60}")
 
-    collector = SecurityEventCollector()
-    result = collector.simulate_session(style=style, event_count=20)
+    collector = SecurityEventCollector(log=log)
+    result = collector.simulate_session(style=style, event_count=16)
 
     print(f"Collected {len(result.events)} events  |  source={result.source}")
+    print(f"Persisted to log : {result.persisted}  ({len(result.log_entries)} log entries)")
+    print(f"Log chain valid  : {log.verify()}  |  total entries now: {len(log)}")
 
     rhythm = RhythmAnalyzer().analyze(result.events)
-    print("\n--- Rhythm Report ---")
-    print(f"  inter_arrival_cv : {rhythm.inter_arrival_cv}")
-    print(f"  duration_cv      : {rhythm.duration_cv}")
-    print(f"  burst_score      : {rhythm.burst_score:.3f}")
-    print(f"  correction_rate  : {rhythm.correction_rate:.3f}")
-    print(f"  notes            : {rhythm.notes}")
-
     profile = Profiler().profile(rhythm)
-    print("\n--- Profiler Verdict ---")
-    print(f"  actor       : {profile.actor.value}")
-    print(f"  score       : {profile.score}")
-    print(f"  confidence  : {profile.confidence}")
-    for r in profile.reasons:
-        print(f"    • {r}")
 
-    # Optional example signals (will be replaced by real analyzers later)
-    entry = None
-    data_flow = None
-    if style == "ai":
-        entry = EntrySignal(
-            severity=72.0,
-            vector="stolen_key",
-            evidence=["Key used from unusual geolocation", "No MFA challenge observed"],
-        )
-        data_flow = DataFlowSignal(
-            volume_score=65.0,
-            speed_score=80.0,
-            method="encrypted_channel",
-            evidence=["Large outbound transfer in short window"],
-        )
+    entry = EntryAnalyzer().analyze(result.events)
+    flow = DataFlowAnalyzer().analyze(result.events)
 
     threat = ThreatScorer().score(
         profile=profile,
-        entry=entry,
-        data_flow=data_flow,
+        entry=entry.signal,
+        data_flow=flow.signal,
         rhythm=rhythm,
     )
 
-    print("\n--- Threat Score ---")
-    print(f"  score       : {threat.score}")
-    print(f"  level       : {threat.level.value}")
-    print(f"  confidence  : {threat.confidence}")
-    print(f"  components  : {threat.components}")
-    for r in threat.reasons:
+    print("\n--- Profiler ---")
+    print(f"  actor={profile.actor.value}  score={profile.score}  conf={profile.confidence}")
+
+    print("\n--- Entry ---")
+    print(f"  vector={entry.signal.vector}  severity={entry.signal.severity}")
+
+    print("\n--- Data Flow ---")
+    print(f"  method={flow.signal.method}  volume={flow.signal.volume_score}  speed={flow.signal.speed_score}")
+
+    print("\n--- Threat ---")
+    print(f"  score={threat.score}  level={threat.level.value}  conf={threat.confidence}")
+    for r in threat.reasons[:4]:
         print(f"    • {r}")
 
 
 def main() -> None:
+    log_path = Path("demo_evidence.jsonl")
+    if log_path.exists():
+        log_path.unlink()  # start clean for the demo
+
+    log = ImmutableLog(log_path)
+
     for style in ("human", "ai", "mixed"):
-        run_one(style)
+        run_one(style, log)
+
+    print(f"\n{'='*60}")
+    print(f"  Final log status")
+    print(f"{'='*60}")
+    print(f"  Total entries : {len(log)}")
+    print(f"  Chain valid   : {log.verify()}")
+    print(f"  Written to    : {log_path.resolve()}")
     print()
 
 
