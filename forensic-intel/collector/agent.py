@@ -10,9 +10,9 @@ before real sensors are wired in.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import List, Optional, Sequence, Union
+from typing import List, Optional, Union
 from pathlib import Path
 import random
 import uuid
@@ -40,7 +40,7 @@ class SecurityEventCollector:
     evidence chain is built automatically.
     """
 
-    def __init(
+    def __init__(
         self,
         source_name: str = "local",
         log: Optional[ImmutableLog] = None,
@@ -109,7 +109,6 @@ class SecurityEventCollector:
 
         written: List[LogEntry] = []
 
-        # Individual events
         for ev in result.events:
             payload = {
                 "session_id": result.session_id,
@@ -122,7 +121,6 @@ class SecurityEventCollector:
             entry = self.log.append("security_event", payload)
             written.append(entry)
 
-        # Session summary (one higher-level record)
         summary_payload = {
             "session_id": result.session_id,
             "source": result.source,
