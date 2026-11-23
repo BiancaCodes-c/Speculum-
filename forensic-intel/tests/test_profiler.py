@@ -1,7 +1,13 @@
 """Profiler returns a verdict with a fingerprint and reasons."""
 
 from datetime import datetime, timedelta
-from forensic_intel.analyzer.profiler import (
+import sys
+from pathlib import Path
+
+# Allow running tests from repo root even with hyphenated folder name
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from analyzer.profiler import (  # type: ignore
     ActionEvent,
     ActorType,
     Profiler,
@@ -14,14 +20,13 @@ def _make_events(count: int, interval_seconds: float = 1.2, jitter: float = 0.0)
     base = datetime(2026, 11, 22, 14, 0, 0)
     events = []
     for i in range(count):
-        # simple deterministic jitter
         offset = interval_seconds * i + (jitter * (i % 3 - 1))
         ts = base + timedelta(seconds=offset)
         events.append(
             ActionEvent(
                 timestamp=ts,
                 action_type="command",
-                duration_ms=80.0 + (i % 5) * 2,  # small variation
+                duration_ms=80.0 + (i % 5) * 2,
             )
         )
     return events
@@ -61,7 +66,6 @@ def test_human_like_irregular():
 def test_ai_like_regular():
     """AI-like: very regular timing, almost constant duration."""
     events = _make_events(20, interval_seconds=0.5, jitter=0.01)
-    # make durations extremely consistent
     for e in events:
         e.duration_ms = 42.0
 
@@ -69,7 +73,8 @@ def test_ai_like_regular():
     assert verdict.actor == ActorType.AI
     assert verdict.score >= 70
     assert verdict.confidence > 0.5
-    assert "regular" in " ".join(verdict.reasons).lower() or "machine" in " ".join(verdict.reasons).lower()
+    reasons_text = " ".join(verdict.reasons).lower()
+    assert "regular" in reasons_text or "machine" in reasons_text
 
 
 def test_verdict_always_has_fingerprint_and_reasons():
