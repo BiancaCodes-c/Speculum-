@@ -10,6 +10,8 @@ from .threat_score import (
     DataFlowSignal,
     calculate_threat_score,
 )
+from .entry_analyzer import EntryAnalyzer, EntryFinding, analyze_entry
+from .data_flow_analyzer import DataFlowAnalyzer, DataFlowFinding, analyze_flow
 
 __all__ = [
     "ActionEvent",
@@ -26,4 +28,10 @@ __all__ = [
     "EntrySignal",
     "DataFlowSignal",
     "calculate_threat_score",
+    "EntryAnalyzer",
+    "EntryFinding",
+    "analyze_entry",
+    "DataFlowAnalyzer",
+    "DataFlowFinding",
+    "analyze_flow",
 ]
