@@ -9,8 +9,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import List, Optional, Sequence
-import statistics
+from typing import List, Optional, Sequence, Union
+
+from .rhythm_analyzer import RhythmAnalyzer, RhythmReport
 
 
 class ActorType(str, Enum):
@@ -37,96 +38,107 @@ class ProfileVerdict:
     fingerprint: dict
     reasons: List[str]
     sample_size: int
+    rhythm: Optional[RhythmReport] = None
 
 
 class Profiler:
-    """Behavioral profiler that decides AI vs HUMAN."""
+    """Behavioral profiler that decides AI vs HUMAN.
 
-    # Thresholds (tunable)
+    Prefers a pre-computed RhythmReport when available.
+    Falls back to analyzing raw ActionEvents via RhythmAnalyzer.
+    """
+
     MIN_EVENTS = 5
-    REGULARITY_AI_THRESHOLD = 0.18      # coefficient of variation below this → highly regular
-    SPEED_AI_THRESHOLD = 0.12           # very low duration variance
-    BURST_RATIO_AI = 0.65               # high proportion of activity in short windows
+    REGULARITY_AI_THRESHOLD = 0.18
+    SPEED_AI_THRESHOLD = 0.12
+    BURST_RATIO_AI = 0.65
 
-    def profile(self, events: Sequence[ActionEvent]) -> ProfileVerdict:
-        if not events or len(events) < self.MIN_EVENTS:
+    def __init__(self, rhythm_analyzer: Optional[RhythmAnalyzer] = None):
+        self.rhythm_analyzer = rhythm_analyzer or RhythmAnalyzer()
+
+    def profile(
+        self,
+        source: Union[Sequence[ActionEvent], RhythmReport],
+    ) -> ProfileVerdict:
+        """Produce a verdict from either raw events or a RhythmReport."""
+        if isinstance(source, RhythmReport):
+            report = source
+        else:
+            events = source
+            if not events or len(events) < self.MIN_EVENTS:
+                return ProfileVerdict(
+                    actor=ActorType.UNCERTAIN,
+                    confidence=0.0,
+                    score=50.0,
+                    fingerprint={},
+                    reasons=["Insufficient events to form a reliable profile."],
+                    sample_size=len(events) if events else 0,
+                )
+            report = self.rhythm_analyzer.analyze(events)
+
+        return self._verdict_from_report(report)
+
+    def _verdict_from_report(self, report: RhythmReport) -> ProfileVerdict:
+        if report.sample_size < self.MIN_EVENTS:
             return ProfileVerdict(
                 actor=ActorType.UNCERTAIN,
                 confidence=0.0,
                 score=50.0,
                 fingerprint={},
                 reasons=["Insufficient events to form a reliable profile."],
-                sample_size=len(events) if events else 0,
+                sample_size=report.sample_size,
+                rhythm=report,
             )
 
-        # Sort by time just in case
-        sorted_events = sorted(events, key=lambda e: e.timestamp)
-
-        inter_arrival_cv = self._inter_arrival_regularity(sorted_events)
-        duration_cv = self._duration_regularity(sorted_events)
-        burst_score = self._burstiness(sorted_events)
-        correction_rate = self._correction_rate(sorted_events)
-        hour_spread = self._hour_spread(sorted_events)
-
-        # Weighted AI-likeness score (0–100)
         score = 0.0
         reasons: List[str] = []
 
         # 1. Timing regularity (strongest signal)
-        if inter_arrival_cv is not None:
-            if inter_arrival_cv < self.REGULARITY_AI_THRESHOLD:
-                contribution = 35.0
-                score += contribution
+        cv = report.inter_arrival_cv
+        if cv is not None:
+            if cv < self.REGULARITY_AI_THRESHOLD:
+                score += 35.0
                 reasons.append(
-                    f"Extremely regular inter-arrival times (CV={inter_arrival_cv:.3f}) — "
-                    f"machine-like cadence."
+                    f"Extremely regular inter-arrival times (CV={cv:.3f}) — machine-like cadence."
                 )
-            elif inter_arrival_cv < 0.35:
-                contribution = 18.0
-                score += contribution
-                reasons.append(
-                    f"Moderately regular timing (CV={inter_arrival_cv:.3f})."
-                )
+            elif cv < 0.35:
+                score += 18.0
+                reasons.append(f"Moderately regular timing (CV={cv:.3f}).")
             else:
-                reasons.append(
-                    f"Irregular timing (CV={inter_arrival_cv:.3f}) — more human-like."
-                )
+                reasons.append(f"Irregular timing (CV={cv:.3f}) — more human-like.")
 
         # 2. Action duration consistency
-        if duration_cv is not None:
-            if duration_cv < self.SPEED_AI_THRESHOLD:
-                contribution = 25.0
-                score += contribution
+        dcv = report.duration_cv
+        if dcv is not None:
+            if dcv < self.SPEED_AI_THRESHOLD:
+                score += 25.0
                 reasons.append(
-                    f"Near-constant action durations (CV={duration_cv:.3f}) — "
-                    f"scripted or automated."
+                    f"Near-constant action durations (CV={dcv:.3f}) — scripted or automated."
                 )
-            elif duration_cv < 0.30:
-                contribution = 12.0
-                score += contribution
-                reasons.append(f"Low variance in action duration (CV={duration_cv:.3f}).")
+            elif dcv < 0.30:
+                score += 12.0
+                reasons.append(f"Low variance in action duration (CV={dcv:.3f}).")
 
         # 3. Burst pattern
-        if burst_score > self.BURST_RATIO_AI:
-            contribution = 15.0
-            score += contribution
+        if report.burst_score > self.BURST_RATIO_AI:
+            score += 15.0
             reasons.append(
-                f"High burst concentration ({burst_score:.0%} of activity in short windows)."
+                f"High burst concentration ({report.burst_score:.0%} of activity in short windows)."
             )
 
-        # 4. Correction / backtrack behavior (humans do this more)
-        if correction_rate < 0.05 and len(sorted_events) > 12:
-            contribution = 10.0
-            score += contribution
+        # 4. Correction / backtrack behavior
+        if report.correction_rate < 0.05 and report.sample_size > 12:
+            score += 10.0
             reasons.append("Very low self-correction / backtrack rate.")
-        elif correction_rate > 0.18:
-            reasons.append(f"Noticeable correction rate ({correction_rate:.0%}) — human signal.")
+        elif report.correction_rate > 0.18:
+            reasons.append(
+                f"Noticeable correction rate ({report.correction_rate:.0%}) — human signal."
+            )
 
         # 5. Time-of-day spread
-        if hour_spread is not None and hour_spread <= 3:
-            contribution = 8.0
-            score += contribution
-            reasons.append(f"Activity tightly clustered in only {hour_spread} hour(s).")
+        if report.hour_spread <= 3:
+            score += 8.0
+            reasons.append(f"Activity tightly clustered in only {report.hour_spread} hour(s).")
 
         score = max(0.0, min(100.0, score))
 
@@ -139,16 +151,24 @@ class Profiler:
             confidence = min(0.95, 0.55 + (35 - score) / 60)
         else:
             actor = ActorType.UNCERTAIN
-            confidence = 0.45 - abs(score - 50) / 100
+            confidence = max(0.2, 0.45 - abs(score - 50) / 100)
 
         fingerprint = {
-            "inter_arrival_cv": round(inter_arrival_cv, 4) if inter_arrival_cv is not None else None,
-            "duration_cv": round(duration_cv, 4) if duration_cv is not None else None,
-            "burst_score": round(burst_score, 3),
-            "correction_rate": round(correction_rate, 3),
-            "hour_spread": hour_spread,
-            "event_count": len(sorted_events),
+            "inter_arrival_cv": round(cv, 4) if cv is not None else None,
+            "duration_cv": round(dcv, 4) if dcv is not None else None,
+            "burst_score": round(report.burst_score, 3),
+            "correction_rate": round(report.correction_rate, 3),
+            "hour_spread": report.hour_spread,
+            "working_hours_ratio": round(report.working_hours_ratio, 3),
+            "pause_count": report.pause_count,
+            "event_count": report.sample_size,
         }
+
+        # Prefer the rich notes from the rhythm analyzer, then fall back
+        if report.notes:
+            # Keep the strongest reasons we just generated + any extra notes
+            combined = reasons + [n for n in report.notes if n not in reasons]
+            reasons = combined[:6]  # keep it readable
 
         if not reasons:
             reasons.append("No strong AI or human signals detected.")
@@ -159,74 +179,13 @@ class Profiler:
             score=round(score, 1),
             fingerprint=fingerprint,
             reasons=reasons,
-            sample_size=len(sorted_events),
+            sample_size=report.sample_size,
+            rhythm=report,
         )
 
-    # ------------------------------------------------------------------
-    # Signal extractors
-    # ------------------------------------------------------------------
 
-    def _inter_arrival_regularity(self, events: Sequence[ActionEvent]) -> Optional[float]:
-        if len(events) < 3:
-            return None
-        deltas = []
-        for i in range(1, len(events)):
-            delta = (events[i].timestamp - events[i - 1].timestamp).total_seconds()
-            if delta > 0:
-                deltas.append(delta)
-        if len(deltas) < 2:
-            return None
-        mean = statistics.mean(deltas)
-        if mean == 0:
-            return 0.0
-        return statistics.stdev(deltas) / mean  # coefficient of variation
-
-    def _duration_regularity(self, events: Sequence[ActionEvent]) -> Optional[float]:
-        durations = [e.duration_ms for e in events if e.duration_ms is not None and e.duration_ms > 0]
-        if len(durations) < 3:
-            return None
-        mean = statistics.mean(durations)
-        if mean == 0:
-            return 0.0
-        return statistics.stdev(durations) / mean
-
-    def _burstiness(self, events: Sequence[ActionEvent]) -> float:
-        """Fraction of events that fall inside the densest 20% time window."""
-        if len(events) < 6:
-            return 0.0
-        timestamps = [e.timestamp.timestamp() for e in events]
-        total_span = max(timestamps) - min(timestamps)
-        if total_span <= 0:
-            return 1.0
-
-        window = total_span * 0.20
-        max_in_window = 0
-        for t in timestamps:
-            count = sum(1 for other in timestamps if t <= other <= t + window)
-            if count > max_in_window:
-                max_in_window = count
-        return max_in_window / len(events)
-
-    def _correction_rate(self, events: Sequence[ActionEvent]) -> float:
-        """Heuristic: actions that look like corrections or backtracks."""
-        if not events:
-            return 0.0
-        correction_keywords = {"undo", "back", "retry", "correct", "fix", "revert", "cancel"}
-        count = 0
-        for e in events:
-            at = e.action_type.lower()
-            if any(k in at for k in correction_keywords):
-                count += 1
-            # also check metadata
-            if e.metadata.get("is_correction") or e.metadata.get("is_backtrack"):
-                count += 1
-        return count / len(events)
-
-    def _hour_spread(self, events: Sequence[ActionEvent]) -> Optional[int]:
-        hours = {e.timestamp.hour for e in events}
-        return len(hours)
-
-
-def profile_actor(events: Sequence[ActionEvent]) -> ProfileVerdict:
+def profile_actor(
+    source: Union[Sequence[ActionEvent], RhythmReport],
+) -> ProfileVerdict:
     """Convenience function — create a Profiler and run it."""
-    return Profiler().profile(events)
+    return Profiler().profile(source)
