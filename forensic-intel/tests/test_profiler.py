@@ -4,8 +4,7 @@ from datetime import datetime, timedelta
 import sys
 from pathlib import Path
 
-# Allow running tests from repo root even with hyphenated folder name
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from analyzer.profiler import (  # type: ignore
     ActionEvent,
@@ -13,10 +12,10 @@ from analyzer.profiler import (  # type: ignore
     Profiler,
     profile_actor,
 )
+from analyzer.rhythm_analyzer import RhythmAnalyzer, analyze_rhythm  # type: ignore
 
 
 def _make_events(count: int, interval_seconds: float = 1.2, jitter: float = 0.0):
-    """Helper to generate timed events."""
     base = datetime(2026, 11, 22, 14, 0, 0)
     events = []
     for i in range(count):
@@ -40,7 +39,6 @@ def test_insufficient_data():
 
 
 def test_human_like_irregular():
-    """Human-like: irregular gaps and some corrections."""
     base = datetime(2026, 11, 22, 10, 0, 0)
     gaps = [0.8, 2.1, 0.4, 3.7, 1.1, 0.9, 4.2, 1.5, 0.6, 2.8, 1.0, 3.1]
     events = []
@@ -61,10 +59,10 @@ def test_human_like_irregular():
     assert verdict.sample_size == len(events)
     assert isinstance(verdict.fingerprint, dict)
     assert len(verdict.reasons) >= 1
+    assert verdict.rhythm is not None
 
 
 def test_ai_like_regular():
-    """AI-like: very regular timing, almost constant duration."""
     events = _make_events(20, interval_seconds=0.5, jitter=0.01)
     for e in events:
         e.duration_ms = 42.0
@@ -84,3 +82,16 @@ def test_verdict_always_has_fingerprint_and_reasons():
     assert hasattr(verdict, "reasons")
     assert isinstance(verdict.reasons, list)
     assert len(verdict.reasons) > 0
+
+
+def test_profiler_accepts_rhythm_report_directly():
+    events = _make_events(15, interval_seconds=0.4, jitter=0.005)
+    for e in events:
+        e.duration_ms = 40.0
+
+    report = analyze_rhythm(events)
+    verdict = Profiler().profile(report)
+
+    assert verdict.actor == ActorType.AI
+    assert verdict.rhythm is report
+    assert verdict.sample_size == 15
