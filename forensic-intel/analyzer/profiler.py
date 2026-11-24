@@ -11,22 +11,13 @@ from datetime import datetime
 from enum import Enum
 from typing import List, Optional, Sequence, Union
 
-from .rhythm_analyzer import RhythmAnalyzer, RhythmReport
+from .rhythm_analyzer import ActionEvent, RhythmAnalyzer, RhythmReport
 
 
 class ActorType(str, Enum):
     HUMAN = "HUMAN"
     AI = "AI"
     UNCERTAIN = "UNCERTAIN"
-
-
-@dataclass
-class ActionEvent:
-    """A single observed action with timing."""
-    timestamp: datetime
-    action_type: str
-    duration_ms: Optional[float] = None
-    metadata: dict = field(default_factory=dict)
 
 
 @dataclass

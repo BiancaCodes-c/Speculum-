@@ -11,7 +11,15 @@ from datetime import datetime, time
 from typing import List, Optional, Sequence
 import statistics
 
-from .profiler import ActionEvent
+
+
+@dataclass
+class ActionEvent:
+    """A single observed action with timing."""
+    timestamp: datetime
+    action_type: str
+    duration_ms: Optional[float] = None
+    metadata: dict = field(default_factory=dict)
 
 
 @dataclass
